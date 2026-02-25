@@ -9,7 +9,10 @@ import android.widget.EditText
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.navigation.NavOptions
 import androidx.navigation.fragment.findNavController
+import com.google.firebase.FirebaseNetworkException
+import com.google.firebase.auth.*
 
 class RegistrationFragment : Fragment(R.layout.fragment_registration) {
 
@@ -21,8 +24,13 @@ class RegistrationFragment : Fragment(R.layout.fragment_registration) {
     private lateinit var buttonRegister: Button
     private var isByNumber = false
 
+    private lateinit var auth: FirebaseAuth
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        auth = FirebaseAuth.getInstance()
+        val prefs = requireActivity().getSharedPreferences("settings", Context.MODE_PRIVATE)
 
         buttonByNumber = view.findViewById(R.id.button_byNumber)
         buttonByEmail = view.findViewById(R.id.button_byEmail)
@@ -31,18 +39,15 @@ class RegistrationFragment : Fragment(R.layout.fragment_registration) {
         editRepeatPassword = view.findViewById(R.id.edit_repeatPassword)
         buttonRegister = view.findViewById(R.id.button_Register)
 
-        val sharedPreferences = requireActivity().getSharedPreferences("settings", Context.MODE_PRIVATE)
-
-        // Инициализация по умолчанию
         selectEmailMode()
 
         buttonByNumber.setOnClickListener { selectNumberMode() }
         buttonByEmail.setOnClickListener { selectEmailMode() }
 
         buttonRegister.setOnClickListener {
-            val inputText = editInput.text.toString()
-            val password = editPassword.text.toString()
-            val repeatPassword = editRepeatPassword.text.toString()
+            val inputText = editInput.text.toString().trim()
+            val password = editPassword.text.toString().trim()
+            val repeatPassword = editRepeatPassword.text.toString().trim()
 
             // Валидация
             if (isByNumber) {
@@ -56,6 +61,7 @@ class RegistrationFragment : Fragment(R.layout.fragment_registration) {
                     return@setOnClickListener
                 }
             }
+
             if (password.length < 8) {
                 Toast.makeText(requireContext(), "Пароль должен быть минимум 8 символов", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
@@ -65,20 +71,34 @@ class RegistrationFragment : Fragment(R.layout.fragment_registration) {
                 return@setOnClickListener
             }
 
-            // Сохранение
-            sharedPreferences.edit()
-                .putString("login", inputText)
-                .putString("password", password)
-                .apply()
+            // Создание пользователя в Firebase
+            if (!isByNumber) {
+                auth.createUserWithEmailAndPassword(inputText, password)
+                    .addOnSuccessListener {
+                        // Сохраняем локально статус регистрации и автологин
+                        prefs.edit()
+                            .putBoolean("isRegistered", true)
+                            .putBoolean("isAutoLogin", true)
+                            .apply()
 
-            // Навигация на контент
-            findNavController().navigate(
-                R.id.oneFragment,
-                null,
-                androidx.navigation.NavOptions.Builder()
-                    .setPopUpTo(R.id.registrationFragment, true) // удаляем RegistrationFragment из back stack
-                    .build()
-            )
+                        // Навигация на контент и очистка back stack
+                        val navOptions = NavOptions.Builder()
+                            .setPopUpTo(R.id.registrationFragment, true)
+                            .build()
+                        findNavController().navigate(R.id.oneFragment, null, navOptions)
+                    }
+                    .addOnFailureListener { exception ->
+                        val message = when (exception) {
+                            is FirebaseAuthUserCollisionException -> "Пользователь с таким email уже существует"
+                            is FirebaseAuthInvalidCredentialsException -> "Некорректный email"
+                            is FirebaseNetworkException -> "Ошибка сети. Проверьте интернет"
+                            else -> "Ошибка регистрации: ${exception.localizedMessage}"
+                        }
+                        Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show()
+                    }
+            } else {
+                Toast.makeText(requireContext(), "Регистрация по номеру пока не реализована", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
